@@ -1,0 +1,56 @@
+---
+
+- hosts: webservers
+  user: root
+  sudo: False
+  vars:
+    app_name: funsa
+    repo_url: https://github.com/mstepniowski/funsa-server.git
+    repo_remote: origin
+    repo_version: master
+    webapps_dir: /srv/webapps
+    domain: funsa.stepniowski.com
+    wsgi_file: funsa.py
+    wsgi_callable: app
+
+  tasks:
+    - name: create webapps directory
+      action: file dest=$webapps_dir state=directory
+
+    - name: ensure log directory
+      action: file dest=$webapps_dir/$app_name/log state=directory
+
+    - name: deploy code from repository
+      action: git repo=$repo_url dest=$webapps_dir/$app_name/src remote=$repo_remote version=$repo_version
+      notify:
+        - restart app
+
+    - name: install dependencies into virtualenv
+      action: pip requirements=$webapps_dir/$app_name/src/requirements.txt virtualenv=$webapps_dir/$app_name/env state=present
+      notify:
+        - restart app
+
+    - name: create nginx site config
+      action: template src=templates/funsa.stepniowski.com dest=/etc/nginx/sites-available/${domain}
+      notify:
+        - restart nginx
+
+    - name: symlink funsa.stepniowski.com nginx site
+      action: file src=/etc/nginx/sites-available/${domain} dest=/etc/nginx/sites-enabled/${domain} owner=root group=root state=link
+      notify:
+        - restart nginx
+
+    - name: create supervisor program config
+      action: template src=templates/supervisor.$app_name.ini dest=/etc/supervisor/$app_name.ini
+      notify:
+        - restart app
+
+    - name: start app
+      action: supervisorctl name=$app_name state=started
+
+  handlers:
+    - name: restart app
+      action: supervisorctl name=$app_name state=restarted
+
+    - name: restart nginx
+      action: service name=nginx state=restarted
